@@ -1,0 +1,172 @@
+#include <vector>
+using namespace std;
+ 
+#define MAX_NR_COMPONENT         40000
+#define NR_WAREHOUSE             2 
+#define NR_COMPONENT_TYPE        3
+#define MAX_COST                 500001
+#define MAX_PERF                 1000000
+#define GROUP_SIZE               20000
+#define GROUP_CNT                ((MAX_PERF + GROUP_SIZE - 1) / GROUP_SIZE)
+ 
+struct Result
+{
+    int mPrice;
+    int mPerformance;
+};
+ 
+struct Component {
+    int price;
+    int perf;
+    int warehouse;
+    int type;
+};
+ 
+struct Group {
+    vector<Component*> components;
+    int min_price;
+};
+ 
+struct Type {
+    int nr_component;
+    Group groups[GROUP_CNT];
+};
+ 
+struct Warehouse {
+    int id;
+    Type types[NR_COMPONENT_TYPE];
+};
+ 
+ 
+Component component_pool[MAX_NR_COMPONENT];
+int component_pool_size;
+Type types[NR_COMPONENT_TYPE];
+Warehouse warehouses[NR_WAREHOUSE];
+int deliver_charge;
+// 0: 3 components from warehouse 0. 
+// 1: 2 from warehouse 0, 1 from warehouse 1.
+// 2: 1 from warehouse 0, 2 from warehouse 1.
+// 3: 3 from warehouse1
+int charges[4] = { 0, 0, 0, 0 };
+int max_perf;
+ 
+inline void InitComponentType(Type* t) {
+    t->nr_component = 0;
+    for (int i = 0; i < GROUP_CNT; ++i) {
+        t->groups[i].components.clear();
+        t->groups[i].min_price = MAX_COST;
+    }
+}
+ 
+inline void InitWarehouse(Warehouse* wh, int id) {
+    wh->id = id;
+    for (int i = 0; i < NR_COMPONENT_TYPE; ++i)
+        InitComponentType(&wh->types[i]);
+}
+ 
+Component* AllocateComponent(int type, int price, int perf, int warehouse) {
+    component_pool_size--;
+    Component* c = &component_pool[component_pool_size];
+    c->type = type;
+    c->price = price;
+    c->perf = perf;
+    c->warehouse = warehouse;
+    return c;
+}
+ 
+inline void AddComponent(Type* t, Component* c) {
+    if (c->perf > max_perf)
+        max_perf = c->perf;
+ 
+    t->nr_component++;
+    Group* g = &t->groups[c->perf / GROUP_SIZE];
+    g->components.push_back(c);
+    if (c->price < g->min_price)
+        g->min_price = c->price;
+}
+ 
+inline int FindMinPrice(Group* g, int min_perf) {
+    int min_cost = MAX_COST;
+    for (auto c : g->components) {
+        if (c->perf >= min_perf && c->price < min_cost)
+            min_cost = c->price;
+    }
+    return min_cost;
+}
+ 
+int FindMinCost(Type* t, int min_perf) {
+    int min_cost = MAX_COST;
+    int idx = min_perf / GROUP_SIZE;
+    if (min_perf % GROUP_SIZE) {
+        min_cost = FindMinPrice(&t->groups[idx], min_perf);
+        idx++;
+    }
+    for (; idx < GROUP_CNT; ++idx)
+        if (min_cost > t->groups[idx].min_price)
+            min_cost = t->groups[idx].min_price;
+    return min_cost;
+}
+ 
+inline void FindMinCost(Warehouse* wh, int min_perf, int min_costs[NR_COMPONENT_TYPE]) {
+    for (int i = 0; i < NR_COMPONENT_TYPE; ++i)
+        min_costs[i] = FindMinCost(&wh->types[i], min_perf);
+}
+ 
+inline int Min(int v1, int v2) {
+    return (v1 > v2) ? v2 : v1;
+}
+ 
+int CalcMinCost(int min_perf) {
+    int min_costs[3][NR_COMPONENT_TYPE];
+    for (int i = 0; i < NR_WAREHOUSE; ++i)
+        FindMinCost(&warehouses[i], min_perf, min_costs[i]);
+    for (int i = 0; i < NR_COMPONENT_TYPE; ++i) {
+        min_costs[2][i] = Min(min_costs[0][i], min_costs[1][i]);
+        if (min_costs[2][i] == MAX_COST)
+            return MAX_COST;
+    }
+    int cost = min_costs[0][0] + min_costs[0][1] + min_costs[0][2];
+    cost = Min(cost, min_costs[1][0] + min_costs[1][1] + min_costs[1][2]);
+    return Min(cost, min_costs[2][0] + min_costs[2][1] + min_costs[2][2] + deliver_charge);
+}
+ 
+ 
+void init(int mCharge)
+{
+    component_pool_size = MAX_NR_COMPONENT;
+    for (int i = 0; i < NR_WAREHOUSE; ++i)
+        InitWarehouse(&warehouses[i], i);
+    deliver_charge = mCharge;
+    max_perf = -1;
+}
+ 
+int stock(int mType, int mPrice, int mPerformance, int mPosition)
+{
+    Component* c = AllocateComponent(mType, mPrice, mPerformance, mPosition);
+    Type* t = &warehouses[mPosition].types[mType];
+    AddComponent(t, c);
+    return t->nr_component;
+}
+ 
+Result order(int mBudget)
+{
+    Result res = { 0, 0 };
+    int min_cost = 0;
+    int left = 0;
+    int right = max_perf + 1; // right is the impossible performance
+    while (left + 1 < right) {
+        int center = (left + right) / 2;
+        int cost = CalcMinCost(center);
+        if (cost <= mBudget) {
+            left = center;
+            min_cost = cost;
+        }
+        else
+            right = center;
+    }
+    if (left == 0)
+        return res;
+    res.mPerformance = left;
+    res.mPrice = min_cost;
+    return res;
+}
